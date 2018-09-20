@@ -22,12 +22,13 @@ namespace Bit.Core.Models.Api
         public bool Favorite { get; set; }
         [Required]
         [EncryptedString]
-        [StringLength(1000)]
+        [EncryptedStringLength(1000)]
         public string Name { get; set; }
         [EncryptedString]
-        [StringLength(10000)]
+        [EncryptedStringLength(10000)]
         public string Notes { get; set; }
         public IEnumerable<CipherFieldModel> Fields { get; set; }
+        public IEnumerable<CipherPasswordHistoryModel> PasswordHistory { get; set; }
         public Dictionary<string, string> Attachments { get; set; }
 
         public CipherLoginModel Login { get; set; }
@@ -156,7 +157,7 @@ namespace Bit.Core.Models.Api
                     new string[] { nameof(Cipher.OrganizationId) });
             }
 
-            if(!CollectionIds?.Any() ?? false)
+            if(!CollectionIds?.Any() ?? true)
             {
                 yield return new ValidationResult("You must select at least one collection.",
                     new string[] { nameof(CollectionIds) });
@@ -183,7 +184,7 @@ namespace Bit.Core.Models.Api
         public string FolderId { get; set; }
     }
 
-    public class CipherBulkShareRequestModel
+    public class CipherBulkShareRequestModel : IValidatableObject
     {
         [Required]
         public IEnumerable<string> CollectionIds { get; set; }
@@ -192,7 +193,7 @@ namespace Bit.Core.Models.Api
 
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {
-            if(!Ciphers?.Any() ?? false)
+            if(!Ciphers?.Any() ?? true)
             {
                 yield return new ValidationResult("You must select at least one cipher.",
                     new string[] { nameof(Ciphers) });
@@ -221,7 +222,7 @@ namespace Bit.Core.Models.Api
                 }
             }
 
-            if(!CollectionIds?.Any() ?? false)
+            if(!CollectionIds?.Any() ?? true)
             {
                 yield return new ValidationResult("You must select at least one collection.",
                     new string[] { nameof(CollectionIds) });

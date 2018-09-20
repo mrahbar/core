@@ -4,6 +4,7 @@ using Bit.Icons.Models;
 using Bit.Icons.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace Bit.Icons.Controllers
 {
@@ -13,17 +14,20 @@ namespace Bit.Icons.Controllers
         private readonly IMemoryCache _memoryCache;
         private readonly IDomainMappingService _domainMappingService;
         private readonly IIconFetchingService _iconFetchingService;
+        private readonly ILogger<IconsController> _logger;
         private readonly IconsSettings _iconsSettings;
 
         public IconsController(
             IMemoryCache memoryCache,
             IDomainMappingService domainMappingService,
             IIconFetchingService iconFetchingService,
+            ILogger<IconsController> logger,
             IconsSettings iconsSettings)
         {
             _memoryCache = memoryCache;
             _domainMappingService = domainMappingService;
             _iconFetchingService = iconFetchingService;
+            _logger = logger;
             _iconsSettings = iconsSettings;
         }
 
@@ -42,10 +46,11 @@ namespace Bit.Icons.Controllers
             }
 
             var domain = uri.Host;
-            if(DomainName.TryParseBaseDomain(domain, out var baseDomain))
-            {
-                domain = baseDomain;
-            }
+            // Convert sub.domain.com => domain.com
+            //if(DomainName.TryParseBaseDomain(domain, out var baseDomain))
+            //{
+            //    domain = baseDomain;
+            //}
 
             var mappedDomain = _domainMappingService.MapDomain(domain);
             if(!_iconsSettings.CacheEnabled || !_memoryCache.TryGetValue(mappedDomain, out Icon icon))
@@ -53,6 +58,7 @@ namespace Bit.Icons.Controllers
                 var result = await _iconFetchingService.GetIconAsync(domain);
                 if(result == null)
                 {
+                    _logger.LogWarning("Null result returned for {0}.", domain);
                     icon = null;
                 }
                 else
@@ -63,6 +69,7 @@ namespace Bit.Icons.Controllers
                 // Only cache not found and smaller images (<= 50kb)
                 if(_iconsSettings.CacheEnabled && (icon == null || icon.Image.Length <= 50012))
                 {
+                    _logger.LogInformation("Cache icon for {0}.", domain);
                     _memoryCache.Set(mappedDomain, icon, new MemoryCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = new TimeSpan(_iconsSettings.CacheHours, 0, 0),

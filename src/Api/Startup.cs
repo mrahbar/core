@@ -1,6 +1,4 @@
-﻿using System;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,9 +13,6 @@ using Serilog.Events;
 using Stripe;
 using Bit.Core.Utilities;
 using IdentityModel;
-using IdentityServer4.AccessTokenValidation;
-using jsreport.AspNetCore;
-using Bit.Core.IdentityServer;
 using Microsoft.AspNetCore.HttpOverrides;
 
 namespace Bit.Api
@@ -42,7 +37,6 @@ namespace Bit.Api
 
             // Settings
             var globalSettings = services.AddGlobalSettingsServices(Configuration);
-            services.Configure<ApiSettings>(Configuration.GetSection("apiSettings"));
             if(!globalSettings.SelfHosted)
             {
                 services.Configure<IpRateLimitOptions>(Configuration.GetSection("IpRateLimitOptions"));
@@ -73,20 +67,7 @@ namespace Bit.Api
 
             // Identity
             services.AddCustomIdentityServices(globalSettings);
-
-            services
-                .AddAuthentication(IdentityServerAuthenticationDefaults.AuthenticationScheme)
-                .AddIdentityServerAuthentication(options =>
-                {
-                    options.Authority = globalSettings.BaseServiceUri.InternalIdentity;
-                    options.RequireHttpsMetadata = !Environment.IsDevelopment() &&
-                        globalSettings.BaseServiceUri.InternalIdentity.StartsWith("https");
-                    options.TokenRetriever = TokenRetrieval.FromAuthorizationHeaderOrQueryString();
-                    options.NameClaimType = ClaimTypes.Email;
-                    options.SupportedTokens = SupportedTokens.Jwt;
-                });
-
-            services.AddAuthorization(config =>
+            services.AddIdentityAuthenticationServices(globalSettings, Environment, config =>
             {
                 config.AddPolicy("Application", policy =>
                 {
@@ -126,13 +107,11 @@ namespace Bit.Api
                 config.Filters.Add(new ModelStateValidationFilterAttribute());
             }).AddJsonOptions(o => o.SerializerSettings.ContractResolver = new DefaultContractResolver());
 
-            // PDF generation
-            if(!globalSettings.SelfHosted)
+            if(globalSettings.SelfHosted)
             {
-                services.AddJsReport(new jsreport.Local.LocalReporting()
-                    .UseBinary(jsreport.Binary.JsReportBinary.GetBinary())
-                    .AsUtility()
-                    .Create());
+                // Jobs service
+                Jobs.JobsHostedService.AddJobsServices(services);
+                services.AddHostedService<Jobs.JobsHostedService>();
             }
         }
 
@@ -152,7 +131,7 @@ namespace Bit.Api
                     return false;
                 }
 
-                if(context.Contains(typeof(IpRateLimitMiddleware).FullName) && e.Level == LogEventLevel.Information)
+                if(e.Level == LogEventLevel.Information && context.Contains(typeof(IpRateLimitMiddleware).FullName))
                 {
                     return true;
                 }

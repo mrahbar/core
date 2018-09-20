@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://i.imgur.com/hyegAjI.png" alt="Bitwarden" />
+  <img src="https://github.com/bitwarden/brand/blob/master/screenshots/apps-combo-logo.png" alt="Bitwarden" />
 </p>
 <p align="center">
   <a href="https://ci.appveyor.com/project/bitwarden/core/branch/master" target="_blank">
@@ -40,8 +40,8 @@ The core infrastructure is written in C# using .NET Core with ASP.NET Core. The 
 ```
 cd src/Api
 dotnet restore
-dotnet build -f netcoreapp2.0
-dotnet run -f netcoreapp2.0
+dotnet build
+dotnet run
 ```
 
 visit http://localhost:5000/alive
@@ -51,8 +51,8 @@ visit http://localhost:5000/alive
 ```
 cd src/Identity
 dotnet restore
-dotnet build -f netcoreapp2.0
-dotnet run -f netcoreapp2.0
+dotnet build
+dotnet run
 ```
 
 visit http://localhost:33657/.well-known/openid-configuration

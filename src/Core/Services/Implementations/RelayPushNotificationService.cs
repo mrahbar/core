@@ -7,10 +7,11 @@ using Bit.Core.Models;
 using System.Net.Http;
 using Bit.Core.Models.Api;
 using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 
 namespace Bit.Core.Services
 {
-    public class RelayPushNotificationService : BaseRelayPushNotificationService, IPushNotificationService
+    public class RelayPushNotificationService : BaseIdentityClientService, IPushNotificationService
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly ILogger<RelayPushNotificationService> _logger;
@@ -19,28 +20,34 @@ namespace Bit.Core.Services
             GlobalSettings globalSettings,
             IHttpContextAccessor httpContextAccessor,
             ILogger<RelayPushNotificationService> logger)
-            : base(globalSettings, logger)
+            : base(
+                  globalSettings.PushRelayBaseUri,
+                  globalSettings.Installation.IdentityUri,
+                  "api.push",
+                  $"installation.{globalSettings.Installation.Id}",
+                  globalSettings.Installation.Key,
+                  logger)
         {
             _httpContextAccessor = httpContextAccessor;
             _logger = logger;
         }
 
-        public async Task PushSyncCipherCreateAsync(Cipher cipher)
+        public async Task PushSyncCipherCreateAsync(Cipher cipher, IEnumerable<Guid> collectionIds)
         {
-            await PushCipherAsync(cipher, PushType.SyncCipherCreate);
+            await PushCipherAsync(cipher, PushType.SyncCipherCreate, collectionIds);
         }
 
-        public async Task PushSyncCipherUpdateAsync(Cipher cipher)
+        public async Task PushSyncCipherUpdateAsync(Cipher cipher, IEnumerable<Guid> collectionIds)
         {
-            await PushCipherAsync(cipher, PushType.SyncCipherUpdate);
+            await PushCipherAsync(cipher, PushType.SyncCipherUpdate, collectionIds);
         }
 
         public async Task PushSyncCipherDeleteAsync(Cipher cipher)
         {
-            await PushCipherAsync(cipher, PushType.SyncLoginDelete);
+            await PushCipherAsync(cipher, PushType.SyncLoginDelete, null);
         }
 
-        private async Task PushCipherAsync(Cipher cipher, PushType type)
+        private async Task PushCipherAsync(Cipher cipher, PushType type, IEnumerable<Guid> collectionIds)
         {
             if(cipher.OrganizationId.HasValue)
             {
@@ -94,27 +101,32 @@ namespace Bit.Core.Services
 
         public async Task PushSyncCiphersAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncCiphers);
+            await PushUserAsync(userId, PushType.SyncCiphers);
         }
 
         public async Task PushSyncVaultAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncVault);
+            await PushUserAsync(userId, PushType.SyncVault);
         }
 
         public async Task PushSyncOrgKeysAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncOrgKeys);
+            await PushUserAsync(userId, PushType.SyncOrgKeys);
         }
 
         public async Task PushSyncSettingsAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncSettings);
+            await PushUserAsync(userId, PushType.SyncSettings);
         }
 
-        private async Task PushSyncUserAsync(Guid userId, PushType type)
+        public async Task PushLogOutAsync(Guid userId)
         {
-            var message = new SyncUserPushNotification
+            await PushUserAsync(userId, PushType.LogOut);
+        }
+
+        private async Task PushUserAsync(Guid userId, PushType type)
+        {
+            var message = new UserPushNotification
             {
                 UserId = userId,
                 Date = DateTime.UtcNow
@@ -137,7 +149,7 @@ namespace Bit.Core.Services
                 ExcludeCurrentContext(request);
             }
 
-            await SendAsync(request);
+            await SendAsync(HttpMethod.Post, "push/send", request);
         }
 
         private async Task SendPayloadToOrganizationAsync(Guid orgId, PushType type, object payload, bool excludeCurrentContext)
@@ -154,31 +166,7 @@ namespace Bit.Core.Services
                 ExcludeCurrentContext(request);
             }
 
-            await SendAsync(request);
-        }
-
-        private async Task SendAsync(PushSendRequestModel requestModel)
-        {
-            var tokenStateResponse = await HandleTokenStateAsync();
-            if(!tokenStateResponse)
-            {
-                return;
-            }
-
-            var message = new TokenHttpRequestMessage(requestModel, AccessToken)
-            {
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(string.Concat(PushClient.BaseAddress, "/push/send"))
-            };
-
-            try
-            {
-                await PushClient.SendAsync(message);
-            }
-            catch(Exception e)
-            {
-                _logger.LogError(12334, e, "Unable to send push notification.");
-            }
+            await SendAsync(HttpMethod.Post, "push/send", request);
         }
 
         private void ExcludeCurrentContext(PushSendRequestModel request)

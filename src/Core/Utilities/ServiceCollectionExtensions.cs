@@ -22,6 +22,9 @@ using SqlServerRepos = Bit.Core.Repositories.SqlServer;
 using System.Threading.Tasks;
 using TableStorageRepos = Bit.Core.Repositories.TableStorage;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using IdentityServer4.AccessTokenValidation;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Bit.Core.Utilities
 {
@@ -65,7 +68,8 @@ namespace Bit.Core.Utilities
 
         public static void AddDefaultServices(this IServiceCollection services, GlobalSettings globalSettings)
         {
-            services.AddSingleton<IMailService, BackupMailService>();
+            services.AddSingleton<IMailService, HandlebarsMailService>();
+            services.AddSingleton<ILicensingService, LicensingService>();
             services.AddSingleton<ILicensingService, NoopLicensingService>();
 //            services.AddSingleton<ILicensingService, LicensingService>();
             services.AddSingleton<IApplicationCacheService, InMemoryApplicationCacheService>();
@@ -83,24 +87,20 @@ namespace Bit.Core.Utilities
                 services.AddSingleton<IMailDeliveryService, NoopMailDeliveryService>();
             }
 
+            services.AddSingleton<IPushNotificationService, MultiServicePushNotificationService>();
             if(globalSettings.SelfHosted &&
                 CoreHelpers.SettingHasValue(globalSettings.PushRelayBaseUri) &&
                 globalSettings.Installation?.Id != null &&
                 CoreHelpers.SettingHasValue(globalSettings.Installation?.Key))
             {
-                services.AddSingleton<IPushNotificationService, RelayPushNotificationService>();
                 services.AddSingleton<IPushRegistrationService, RelayPushRegistrationService>();
             }
-#if NET471
             else if(!globalSettings.SelfHosted)
             {
-                services.AddSingleton<IPushNotificationService, NotificationHubPushNotificationService>();
                 services.AddSingleton<IPushRegistrationService, NotificationHubPushRegistrationService>();
             }
-#endif
             else
             {
-                services.AddSingleton<IPushNotificationService, NoopPushNotificationService>();
                 services.AddSingleton<IPushRegistrationService, NoopPushRegistrationService>();
             }
 
@@ -155,10 +155,8 @@ namespace Bit.Core.Utilities
         public static IdentityBuilder AddCustomIdentityServices(
             this IServiceCollection services, GlobalSettings globalSettings)
         {
-            services.AddTransient<ILookupNormalizer, LowerInvariantLookupNormalizer>();
             services.AddSingleton<IOrganizationDuoWebTokenProvider, OrganizationDuoWebTokenProvider>();
-
-            services.Configure<PasswordHasherOptions>(options => options.IterationCount = 50000);
+            services.Configure<PasswordHasherOptions>(options => options.IterationCount = 100000);
             services.Configure<TwoFactorRememberTokenProviderOptions>(options =>
             {
                 options.TokenLifespan = TimeSpan.FromDays(30);
@@ -202,20 +200,22 @@ namespace Bit.Core.Utilities
             return identityBuilder;
         }
 
-        public static IdentityBuilder AddPasswordlessIdentityServices<TUserStore>(
+        public static Tuple<IdentityBuilder, IdentityBuilder> AddPasswordlessIdentityServices<TUserStore>(
             this IServiceCollection services, GlobalSettings globalSettings) where TUserStore : class
         {
-            services.AddTransient<ILookupNormalizer, LowerInvariantLookupNormalizer>();
-
+            services.TryAddTransient<ILookupNormalizer, LowerInvariantLookupNormalizer>();
             services.Configure<DataProtectionTokenProviderOptions>(options =>
             {
                 options.TokenLifespan = TimeSpan.FromMinutes(15);
             });
 
-            var identityBuilder = services.AddIdentity<IdentityUser, Role>()
+            var passwordlessIdentityBuilder = services.AddIdentity<IdentityUser, Role>()
                 .AddUserStore<TUserStore>()
                 .AddRoleStore<RoleStore>()
                 .AddDefaultTokenProviders();
+
+            var regularIdentityBuilder = services.AddIdentityCore<User>()
+                .AddUserStore<UserStore>();
 
             services.TryAddScoped<PasswordlessSignInManager<IdentityUser>, PasswordlessSignInManager<IdentityUser>>();
 
@@ -231,7 +231,32 @@ namespace Bit.Core.Utilities
                 options.SlidingExpiration = true;
             });
 
-            return identityBuilder;
+            return new Tuple<IdentityBuilder, IdentityBuilder>(passwordlessIdentityBuilder, regularIdentityBuilder);
+        }
+
+        public static void AddIdentityAuthenticationServices(
+            this IServiceCollection services, GlobalSettings globalSettings, IHostingEnvironment environment,
+            Action<AuthorizationOptions> addAuthorization)
+        {
+            services
+                .AddAuthentication(IdentityServerAuthenticationDefaults.AuthenticationScheme)
+                .AddIdentityServerAuthentication(options =>
+                {
+                    options.Authority = globalSettings.BaseServiceUri.InternalIdentity;
+                    options.RequireHttpsMetadata = !environment.IsDevelopment() &&
+                        globalSettings.BaseServiceUri.InternalIdentity.StartsWith("https");
+                    options.TokenRetriever = TokenRetrieval.FromAuthorizationHeaderOrQueryString();
+                    options.NameClaimType = ClaimTypes.Email;
+                    options.SupportedTokens = SupportedTokens.Jwt;
+                });
+
+            if(addAuthorization != null)
+            {
+                services.AddAuthorization(config =>
+                {
+                    addAuthorization.Invoke(config);
+                });
+            }
         }
 
         public static IIdentityServerBuilder AddCustomIdentityServerServices(

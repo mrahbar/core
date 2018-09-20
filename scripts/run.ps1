@@ -34,8 +34,8 @@ function Install() {
     
         if ($letsEncrypt -eq "y") {
             Write-Host "(!) " -f cyan -nonewline
-            [string]$email = $( Read-Host "Enter your email address (Let's Encrypt will send you certificate " +
-                "expiration reminders)" )
+            [string]$email = $( Read-Host ("Enter your email address (Let's Encrypt will send you certificate " +
+                "expiration reminders)") )
             echo ""
     
             $letsEncryptPath = "${outputDir}/letsencrypt"
@@ -53,42 +53,34 @@ function Install() {
     docker run -it --rm --name setup -v ${outputDir}:/bitwarden bitwarden/setup:$coreVersion `
         dotnet Setup.dll -install 1 -domain ${domain} -letsencrypt ${letsEncrypt} `
         -os win -corev $coreVersion -webv $webVersion
-    
-    echo ""
-    echo "Setup complete"
-    echo ""    
 }
 
 function Docker-Compose-Up {
-    if (Test-Path -Path "${dockerDir}\docker-compose.override.yml" -PathType leaf) {
-        docker-compose -f ${dockerDir}\docker-compose.yml -f ${dockerDir}\docker-compose.override.yml up -d
-    }
-    else {
-        docker-compose -f ${dockerDir}\docker-compose.yml up -d
-    }
+    Docker-Compose-Files
+    docker-compose up -d
 }
 
 function Docker-Compose-Down {
-    if (Test-Path -Path "${dockerDir}\docker-compose.override.yml" -PathType leaf) {
-        docker-compose -f ${dockerDir}\docker-compose.yml -f ${dockerDir}\docker-compose.override.yml down
-    }
-    else {
-        docker-compose -f ${dockerDir}\docker-compose.yml down
-    }
+    Docker-Compose-Files
+    docker-compose down
 }
 
 function Docker-Compose-Pull {
+    Docker-Compose-Files
+    docker-compose pull
+}
+
+function Docker-Compose-Files {
     if (Test-Path -Path "${dockerDir}\docker-compose.override.yml" -PathType leaf) {
-        docker-compose -f ${dockerDir}\docker-compose.yml -f ${dockerDir}\docker-compose.override.yml pull
+        $env:COMPOSE_FILE = "${dockerDir}\docker-compose.yml;${dockerDir}\docker-compose.override.yml"
     }
     else {
-        docker-compose -f ${dockerDir}\docker-compose.yml pull
+        $env:COMPOSE_FILE = "${dockerDir}\docker-compose.yml"
     }
-    
 }
 
 function Docker-Prune {
-    docker image prune -f
+    docker image prune -f --filter="label=com.bitwarden.product=bitwarden"
 }
 
 function Update-Lets-Encrypt {
@@ -108,8 +100,10 @@ function Update-Database {
     echo "Database update complete"
 }
 
-function Update {
-    Pull-Setup
+function Update([switch] $withpull) {
+    if ($withpull) {
+        Pull-Setup
+    }
     docker run -it --rm --name setup -v ${outputDir}:/bitwarden bitwarden/setup:$coreVersion `
         dotnet Setup.dll -update 1 -os win -corev $coreVersion -webv $webVersion
 }
@@ -152,9 +146,13 @@ elseif ($updatedb) {
 }
 elseif ($update) {
     Docker-Compose-Down
-    Update
+    Update -withpull
     Restart
     echo "Pausing 60 seconds for database to come online. Please wait..."
     Start-Sleep -s 60
     Update-Database
+}
+elseif ($rebuild) {
+    Docker-Compose-Down
+    Update
 }

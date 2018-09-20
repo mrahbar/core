@@ -30,6 +30,8 @@ namespace Bit.Core.Services
         Task<IdentityResult> ChangeEmailAsync(User user, string masterPassword, string newEmail, string newMasterPassword,
             string token, string key);
         Task<IdentityResult> ChangePasswordAsync(User user, string masterPassword, string newMasterPassword, string key);
+        Task<IdentityResult> ChangeKdfAsync(User user, string masterPassword, string newMasterPassword, string key,
+            KdfType kdf, int kdfIterations);
         Task<IdentityResult> UpdateKeyAsync(User user, string masterPassword, string key, string privateKey,
             IEnumerable<Cipher> ciphers, IEnumerable<Folder> folders);
         Task<IdentityResult> RefreshSecurityStampAsync(User user, string masterPasswordHash);
@@ -51,5 +53,6 @@ namespace Bit.Core.Services
         Task UpdatePremiumExpirationAsync(Guid userId, DateTime? expirationDate);
         Task<UserLicense> GenerateLicenseAsync(User user, BillingInfo billingInfo = null);
         Task<bool> CheckPasswordAsync(User user, string password);
+        Task<bool> CanAccessPremium(User user);
     }
 }

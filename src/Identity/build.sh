@@ -7,10 +7,12 @@ echo -e "\n## Building Identity"
 
 echo -e "\nBuilding app"
 echo ".NET Core version $(dotnet --version)"
+echo "Restore"
+dotnet restore $DIR/Identity.csproj
 echo "Clean"
-dotnet clean $DIR/Identity.csproj -f netcoreapp2.0 -c "Release" -o $DIR/obj/Docker/publish
+dotnet clean $DIR/Identity.csproj -c "Release" -o $DIR/obj/Docker/publish
 echo "Publish"
-dotnet publish $DIR/Identity.csproj -f netcoreapp2.0 -c "Release" -o $DIR/obj/Docker/publish
+dotnet publish $DIR/Identity.csproj -c "Release" -o $DIR/obj/Docker/publish
 
 echo -e "\nBuilding docker image"
 docker --version

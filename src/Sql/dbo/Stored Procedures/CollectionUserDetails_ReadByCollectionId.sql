@@ -32,13 +32,11 @@ BEGIN
     LEFT JOIN
         [dbo].[User] U ON U.[Id] = OU.[UserId]
     WHERE
-        CU.[CollectionId] IS NOT NULL
-        OR CG.[CollectionId] IS NOT NULL
-        OR (
-            OU.[OrganizationId] = @OrganizationId
-            AND (
-                OU.[AccessAll] = 1
-                OR G.[AccessAll] = 1
-            )
+        OU.[OrganizationId] = @OrganizationId
+        AND (
+            CU.[CollectionId] IS NOT NULL
+            OR CG.[CollectionId] IS NOT NULL
+            OR OU.[AccessAll] = 1
+            OR G.[AccessAll] = 1
         )
 END

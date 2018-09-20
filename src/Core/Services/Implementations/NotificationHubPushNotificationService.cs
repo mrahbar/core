@@ -1,5 +1,4 @@
-﻿#if NET471
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Bit.Core.Models.Table;
 using Microsoft.Azure.NotificationHubs;
@@ -13,35 +12,36 @@ namespace Bit.Core.Services
 {
     public class NotificationHubPushNotificationService : IPushNotificationService
     {
-        private readonly NotificationHubClient _client;
+        private readonly GlobalSettings _globalSettings;
         private readonly IHttpContextAccessor _httpContextAccessor;
+
+        private NotificationHubClient _client = null;
+        private DateTime? _clientExpires = null;
 
         public NotificationHubPushNotificationService(
             GlobalSettings globalSettings,
             IHttpContextAccessor httpContextAccessor)
         {
-            _client = NotificationHubClient.CreateClientFromConnectionString(globalSettings.NotificationHub.ConnectionString,
-                globalSettings.NotificationHub.HubName);
-
+            _globalSettings = globalSettings;
             _httpContextAccessor = httpContextAccessor;
         }
 
-        public async Task PushSyncCipherCreateAsync(Cipher cipher)
+        public async Task PushSyncCipherCreateAsync(Cipher cipher, IEnumerable<Guid> collectionIds)
         {
-            await PushCipherAsync(cipher, PushType.SyncCipherCreate);
+            await PushCipherAsync(cipher, PushType.SyncCipherCreate, collectionIds);
         }
 
-        public async Task PushSyncCipherUpdateAsync(Cipher cipher)
+        public async Task PushSyncCipherUpdateAsync(Cipher cipher, IEnumerable<Guid> collectionIds)
         {
-            await PushCipherAsync(cipher, PushType.SyncCipherUpdate);
+            await PushCipherAsync(cipher, PushType.SyncCipherUpdate, collectionIds);
         }
 
         public async Task PushSyncCipherDeleteAsync(Cipher cipher)
         {
-            await PushCipherAsync(cipher, PushType.SyncLoginDelete);
+            await PushCipherAsync(cipher, PushType.SyncLoginDelete, null);
         }
 
-        private async Task PushCipherAsync(Cipher cipher, PushType type)
+        private async Task PushCipherAsync(Cipher cipher, PushType type, IEnumerable<Guid> collectionIds)
         {
             if(cipher.OrganizationId.HasValue)
             {
@@ -95,27 +95,32 @@ namespace Bit.Core.Services
 
         public async Task PushSyncCiphersAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncCiphers);
+            await PushUserAsync(userId, PushType.SyncCiphers);
         }
 
         public async Task PushSyncVaultAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncVault);
+            await PushUserAsync(userId, PushType.SyncVault);
         }
 
         public async Task PushSyncOrgKeysAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncOrgKeys);
+            await PushUserAsync(userId, PushType.SyncOrgKeys);
         }
 
         public async Task PushSyncSettingsAsync(Guid userId)
         {
-            await PushSyncUserAsync(userId, PushType.SyncSettings);
+            await PushUserAsync(userId, PushType.SyncSettings);
         }
 
-        private async Task PushSyncUserAsync(Guid userId, PushType type)
+        public async Task PushLogOutAsync(Guid userId)
         {
-            var message = new SyncUserPushNotification
+            await PushUserAsync(userId, PushType.LogOut);
+        }
+
+        private async Task PushUserAsync(Guid userId, PushType type)
+        {
+            var message = new UserPushNotification
             {
                 UserId = userId,
                 Date = DateTime.UtcNow
@@ -170,13 +175,25 @@ namespace Bit.Core.Services
 
         private async Task SendPayloadAsync(string tag, PushType type, object payload)
         {
-            await _client.SendTemplateNotificationAsync(
+            await RenewClientAndExecuteAsync(async client => await client.SendTemplateNotificationAsync(
                 new Dictionary<string, string>
                 {
                     { "type",  ((byte)type).ToString() },
                     { "payload", JsonConvert.SerializeObject(payload) }
-                }, tag);
+                }, tag));
+        }
+
+        private async Task RenewClientAndExecuteAsync(Func<NotificationHubClient, Task> task)
+        {
+            var now = DateTime.UtcNow;
+            if(_client == null || !_clientExpires.HasValue || _clientExpires.Value < now)
+            {
+                _clientExpires = now.Add(TimeSpan.FromMinutes(30));
+                _client = NotificationHubClient.CreateClientFromConnectionString(
+                    _globalSettings.NotificationHub.ConnectionString,
+                    _globalSettings.NotificationHub.HubName);
+            }
+            await task(_client);
         }
     }
 }
-#endif

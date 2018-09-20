@@ -7,6 +7,8 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Bit.Icons.Models;
 using AngleSharp.Parser.Html;
+using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace Bit.Icons.Services
 {
@@ -29,9 +31,17 @@ namespace Bit.Icons.Services
 
         private readonly HashSet<string> _allowedMediaTypes;
         private readonly HttpClient _httpClient;
+        private readonly ILogger<IIconFetchingService> _logger;
+        private readonly Regex _ipRegex;
 
-        public IconFetchingService()
+        public IconFetchingService(ILogger<IIconFetchingService> logger)
         {
+            _logger = logger;
+            _ipRegex = new Regex("^" +
+                "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+                "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+                "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+                "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
             _allowedMediaTypes = new HashSet<string>
             {
                 _pngMediaType,
@@ -50,8 +60,15 @@ namespace Bit.Icons.Services
 
         public async Task<IconResult> GetIconAsync(string domain)
         {
+            if(_ipRegex.IsMatch(domain))
+            {
+                _logger.LogWarning("IP address: {0}.", domain);
+                return null;
+            }
+
             if(!Uri.TryCreate($"https://{domain}", UriKind.Absolute, out var parsedHttpsUri))
             {
+                _logger.LogWarning("Bad domain: {0}.", domain);
                 return null;
             }
 
@@ -64,17 +81,30 @@ namespace Bit.Icons.Services
                 uri = parsedHttpUri;
                 response = await GetAndFollowAsync(uri, 2);
 
-                if((response == null || !response.IsSuccessStatusCode) &&
-                    Uri.TryCreate($"https://www.{parsedHttpsUri.Host}", UriKind.Absolute, out var parsedWwwUri))
+                if(response == null || !response.IsSuccessStatusCode)
                 {
-                    Cleanup(response);
-                    uri = parsedWwwUri;
-                    response = await GetAndFollowAsync(uri, 2);
+                    var dotCount = domain.Count(c => c == '.');
+                    if(dotCount > 1 && DomainName.TryParseBaseDomain(domain, out var baseDomain) &&
+                        Uri.TryCreate($"https://{baseDomain}", UriKind.Absolute, out var parsedBaseUri))
+                    {
+                        Cleanup(response);
+                        uri = parsedBaseUri;
+                        response = await GetAndFollowAsync(uri, 2);
+                    }
+                    else if(dotCount < 2 &&
+                        Uri.TryCreate($"https://www.{parsedHttpsUri.Host}", UriKind.Absolute, out var parsedWwwUri))
+                    {
+                        Cleanup(response);
+                        uri = parsedWwwUri;
+                        response = await GetAndFollowAsync(uri, 2);
+                    }
                 }
             }
 
             if(response?.Content == null || !response.IsSuccessStatusCode)
             {
+                _logger.LogWarning("Couldn't load a website for {0}: {1}.", domain,
+                    response?.StatusCode.ToString() ?? "null");
                 Cleanup(response);
                 return null;
             }
@@ -87,6 +117,7 @@ namespace Bit.Icons.Services
                 uri = response.RequestMessage.RequestUri;
                 if(document.DocumentElement == null)
                 {
+                    _logger.LogWarning("No DocumentElement for {0}.", domain);
                     return null;
                 }
 
@@ -187,6 +218,7 @@ namespace Bit.Icons.Services
                     }
                     else
                     {
+                        _logger.LogWarning("No favicon.ico found for {0}.", uri.Host);
                         return null;
                     }
                 }

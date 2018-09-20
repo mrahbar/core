@@ -4,30 +4,40 @@ using Bit.Core.Models.Table;
 using Bit.Core.Enums;
 using YubicoDotNetClient;
 using System.Linq;
+using Bit.Core.Services;
+using System;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Bit.Core.Identity
 {
     public class YubicoOtpTokenProvider : IUserTwoFactorTokenProvider<User>
     {
+        private readonly IServiceProvider _serviceProvider;
         private readonly GlobalSettings _globalSettings;
 
-        public YubicoOtpTokenProvider(GlobalSettings globalSettings)
+        public YubicoOtpTokenProvider(
+            IServiceProvider serviceProvider,
+            GlobalSettings globalSettings)
         {
+            _serviceProvider = serviceProvider;
             _globalSettings = globalSettings;
         }
 
-        public Task<bool> CanGenerateTwoFactorTokenAsync(UserManager<User> manager, User user)
+        public async Task<bool> CanGenerateTwoFactorTokenAsync(UserManager<User> manager, User user)
         {
-            if(!user.Premium)
+            var userService = _serviceProvider.GetRequiredService<IUserService>();
+            if(!(await userService.CanAccessPremium(user)))
             {
-                return Task.FromResult(false);
+                return false;
             }
 
             var provider = user.GetTwoFactorProvider(TwoFactorProviderType.YubiKey);
-            var canGenerate = user.TwoFactorProviderIsEnabled(TwoFactorProviderType.YubiKey)
-                && (provider?.MetaData.Values.Any(v => !string.IsNullOrWhiteSpace((string)v)) ?? false);
+            if(!provider?.MetaData.Values.Any(v => !string.IsNullOrWhiteSpace((string)v)) ?? true)
+            {
+                return false;
+            }
 
-            return Task.FromResult(canGenerate);
+            return await user.TwoFactorProviderIsEnabledAsync(TwoFactorProviderType.YubiKey, userService);
         }
 
         public Task<string> GenerateAsync(string purpose, UserManager<User> manager, User user)
@@ -37,7 +47,8 @@ namespace Bit.Core.Identity
 
         public async Task<bool> ValidateAsync(string purpose, string token, UserManager<User> manager, User user)
         {
-            if(!user.Premium)
+            var userService = _serviceProvider.GetRequiredService<IUserService>();
+            if(!(await userService.CanAccessPremium(user)))
             {
                 return false;
             }

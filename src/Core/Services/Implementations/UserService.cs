@@ -39,6 +39,7 @@ namespace Bit.Core.Services
         private readonly IEnumerable<IPasswordValidator<User>> _passwordValidators;
         private readonly ILicensingService _licenseService;
         private readonly IEventService _eventService;
+        private readonly IApplicationCacheService _applicationCacheService;
         private readonly IDataProtector _organizationServiceDataProtector;
         private readonly CurrentContext _currentContext;
         private readonly GlobalSettings _globalSettings;
@@ -61,6 +62,7 @@ namespace Bit.Core.Services
             ILogger<UserManager<User>> logger,
             ILicensingService licenseService,
             IEventService eventService,
+            IApplicationCacheService applicationCacheService,
             IDataProtectionProvider dataProtectionProvider,
             CurrentContext currentContext,
             GlobalSettings globalSettings)
@@ -87,6 +89,7 @@ namespace Bit.Core.Services
             _passwordValidators = passwordValidators;
             _licenseService = licenseService;
             _eventService = eventService;
+            _applicationCacheService = applicationCacheService;
             _organizationServiceDataProtector = dataProtectionProvider.CreateProtector(
                 "OrganizationServiceDataProtector");
             _currentContext = currentContext;
@@ -179,10 +182,15 @@ namespace Bit.Core.Services
             if(!string.IsNullOrWhiteSpace(user.GatewaySubscriptionId))
             {
                 var paymentService = user.GetPaymentService(_globalSettings);
-                await paymentService.CancelSubscriptionAsync(user, true);
+                try
+                {
+                    await paymentService.CancelSubscriptionAsync(user, true);
+                }
+                catch(GatewayException) { }
             }
 
             await _userRepository.DeleteAsync(user);
+            await _pushService.PushLogOutAsync(user.Id);
             return IdentityResult.Success;
         }
 
@@ -215,7 +223,7 @@ namespace Bit.Core.Services
             var tokenValid = false;
             if(_globalSettings.DisableUserRegistration && !string.IsNullOrWhiteSpace(token) && orgUserId.HasValue)
             {
-                tokenValid = CoreHelpers.UserInviteTokenIsValid(_organizationServiceDataProtector, token, 
+                tokenValid = CoreHelpers.UserInviteTokenIsValid(_organizationServiceDataProtector, token,
                     user.Email, orgUserId.Value);
             }
 
@@ -408,6 +416,7 @@ namespace Bit.Core.Services
             user.EmailVerified = true;
             user.RevisionDate = user.AccountRevisionDate = DateTime.UtcNow;
             await _userRepository.ReplaceAsync(user);
+            await _pushService.PushLogOutAsync(user.Id);
 
             return IdentityResult.Success;
         }
@@ -438,11 +447,41 @@ namespace Bit.Core.Services
 
                 await _userRepository.ReplaceAsync(user);
                 await _eventService.LogUserEventAsync(user.Id, EventType.User_ChangedPassword);
+                await _pushService.PushLogOutAsync(user.Id);
 
                 return IdentityResult.Success;
             }
 
             Logger.LogWarning("Change password failed for user {userId}.", user.Id);
+            return IdentityResult.Failed(_identityErrorDescriber.PasswordMismatch());
+        }
+
+        public async Task<IdentityResult> ChangeKdfAsync(User user, string masterPassword, string newMasterPassword,
+            string key, KdfType kdf, int kdfIterations)
+        {
+            if(user == null)
+            {
+                throw new ArgumentNullException(nameof(user));
+            }
+
+            if(await CheckPasswordAsync(user, masterPassword))
+            {
+                var result = await UpdatePasswordHash(user, newMasterPassword);
+                if(!result.Succeeded)
+                {
+                    return result;
+                }
+
+                user.RevisionDate = user.AccountRevisionDate = DateTime.UtcNow;
+                user.Key = key;
+                user.Kdf = kdf;
+                user.KdfIterations = kdfIterations;
+                await _userRepository.ReplaceAsync(user);
+                await _pushService.PushLogOutAsync(user.Id);
+                return IdentityResult.Success;
+            }
+
+            Logger.LogWarning("Change KDF failed for user {userId}.", user.Id);
             return IdentityResult.Failed(_identityErrorDescriber.PasswordMismatch());
         }
 
@@ -456,6 +495,11 @@ namespace Bit.Core.Services
 
             if(await CheckPasswordAsync(user, masterPassword))
             {
+                if(!string.IsNullOrWhiteSpace(user.Key))
+                {
+                    throw new BadRequestException("User already has an updated encryption key.");
+                }
+
                 user.RevisionDate = user.AccountRevisionDate = DateTime.UtcNow;
                 user.SecurityStamp = Guid.NewGuid().ToString();
                 user.Key = key;
@@ -469,10 +513,11 @@ namespace Bit.Core.Services
                     await _userRepository.ReplaceAsync(user);
                 }
 
+                await _pushService.PushLogOutAsync(user.Id);
                 return IdentityResult.Success;
             }
 
-            Logger.LogWarning("Update key for user {userId}.", user.Id);
+            Logger.LogWarning("Update key failed for user {userId}.", user.Id);
             return IdentityResult.Failed(_identityErrorDescriber.PasswordMismatch());
         }
 
@@ -492,6 +537,7 @@ namespace Bit.Core.Services
                 }
 
                 await SaveUserAsync(user);
+                await _pushService.PushLogOutAsync(user.Id);
                 return IdentityResult.Success;
             }
 
@@ -624,6 +670,7 @@ namespace Bit.Core.Services
             try
             {
                 await SaveUserAsync(user);
+                await _pushService.PushSyncVaultAsync(user.Id);
             }
             catch when(!_globalSettings.SelfHosted)
             {
@@ -780,6 +827,22 @@ namespace Bit.Core.Services
                 Logger.LogWarning(0, "Invalid password for user {userId}.", user.Id);
             }
             return success;
+        }
+
+        public async Task<bool> CanAccessPremium(User user)
+        {
+            if(user.Premium)
+            {
+                return true;
+            }
+            var orgs = await _currentContext.OrganizationMembershipAsync(_organizationUserRepository, user.Id);
+            if(!orgs.Any())
+            {
+                return false;
+            }
+            var orgAbilities = await _applicationCacheService.GetOrganizationAbilitiesAsync();
+            return orgs.Any(o => orgAbilities.ContainsKey(o.Id) &&
+                orgAbilities[o.Id].UsersGetPremium && orgAbilities[o.Id].Enabled);
         }
 
         private async Task<IdentityResult> UpdatePasswordHash(User user, string newPassword,

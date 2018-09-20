@@ -37,8 +37,8 @@ fi
 
 SCRIPTS_DIR="$OUTPUT/scripts"
 GITHUB_BASE_URL="https://raw.githubusercontent.com/bitwarden/core/master"
-COREVERSION="1.20.0"
-WEBVERSION="1.27.0"
+COREVERSION="1.24.0"
+WEBVERSION="2.3.0"
 
 # Functions
 
@@ -66,7 +66,7 @@ function checkOutputDirExists() {
 }
 
 function checkOutputDirNotExists() {
-    if [ -d "$OUTPUT" ]
+    if [ -d "$OUTPUT/docker" ]
     then
         echo "Looks like Bitwarden is already installed at $OUTPUT."
         exit 1
@@ -78,7 +78,7 @@ function checkOutputDirNotExists() {
 if [ "$1" == "install" ]
 then
     checkOutputDirNotExists
-    mkdir $OUTPUT
+    mkdir -p $OUTPUT
     downloadRunFile
     $SCRIPTS_DIR/run.sh install $OUTPUT $COREVERSION $WEBVERSION
 elif [ "$1" == "start" -o "$1" == "restart" ]
@@ -90,6 +90,10 @@ then
     checkOutputDirExists
     downloadRunFile
     $SCRIPTS_DIR/run.sh update $OUTPUT $COREVERSION $WEBVERSION
+elif [ "$1" == "rebuild" ]
+then
+    checkOutputDirExists
+    $SCRIPTS_DIR/run.sh rebuild $OUTPUT $COREVERSION $WEBVERSION
 elif [ "$1" == "updatedb" ]
 then
     checkOutputDirExists

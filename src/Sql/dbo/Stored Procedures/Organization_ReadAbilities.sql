@@ -13,6 +13,7 @@ BEGIN
         ELSE
             0
         END AS [Using2fa],
+        [UsersGetPremium],
         [Enabled]
     FROM
         [dbo].[Organization]

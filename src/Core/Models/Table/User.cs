@@ -3,10 +3,10 @@ using Bit.Core.Enums;
 using Bit.Core.Utilities;
 using System.Collections.Generic;
 using Newtonsoft.Json;
-using System.Linq;
 using Bit.Core.Services;
 using Bit.Core.Exceptions;
 using Microsoft.AspNetCore.Identity;
+using System.Threading.Tasks;
 
 namespace Bit.Core.Models.Table
 {
@@ -39,6 +39,8 @@ namespace Bit.Core.Models.Table
         public string GatewayCustomerId { get; set; }
         public string GatewaySubscriptionId { get; set; }
         public string LicenseKey { get; set; }
+        public KdfType Kdf { get; set; } = KdfType.PBKDF2_SHA256;
+        public int KdfIterations { get; set; } = 5000;
         public DateTime CreationDate { get; internal set; } = DateTime.UtcNow;
         public DateTime RevisionDate { get; internal set; } = DateTime.UtcNow;
 
@@ -90,18 +92,24 @@ namespace Bit.Core.Models.Table
             _twoFactorProviders = providers;
         }
 
-        public bool TwoFactorProviderIsEnabled(TwoFactorProviderType provider)
+        public async Task<bool> TwoFactorProviderIsEnabledAsync(TwoFactorProviderType provider,
+            IUserService userService)
         {
             var providers = GetTwoFactorProviders();
-            if(providers == null || !providers.ContainsKey(provider))
+            if(providers == null || !providers.ContainsKey(provider) || !providers[provider].Enabled)
             {
                 return false;
             }
 
-            return providers[provider].Enabled && (Premium || !TwoFactorProvider.RequiresPremium(provider));
+            if(!TwoFactorProvider.RequiresPremium(provider))
+            {
+                return true;
+            }
+
+            return await userService.CanAccessPremium(this);
         }
 
-        public bool TwoFactorIsEnabled()
+        public async Task<bool> TwoFactorIsEnabledAsync(IUserService userService)
         {
             var providers = GetTwoFactorProviders();
             if(providers == null)
@@ -109,8 +117,21 @@ namespace Bit.Core.Models.Table
                 return false;
             }
 
-            return providers.Any(p => (p.Value?.Enabled ?? false) && 
-                (Premium || !TwoFactorProvider.RequiresPremium(p.Key)));
+            foreach(var p in providers)
+            {
+                if(p.Value?.Enabled ?? false)
+                {
+                    if(!TwoFactorProvider.RequiresPremium(p.Key))
+                    {
+                        return true;
+                    }
+                    if(await userService.CanAccessPremium(this))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         public TwoFactorProvider GetTwoFactorProvider(TwoFactorProviderType provider)
@@ -168,7 +189,7 @@ namespace Bit.Core.Models.Table
             return paymentService;
         }
 
-        public IdentityUser ToIdentityUser()
+        public IdentityUser ToIdentityUser(bool twoFactorEnabled)
         {
             return new IdentityUser
             {
@@ -178,7 +199,7 @@ namespace Bit.Core.Models.Table
                 EmailConfirmed = EmailVerified,
                 UserName = Email,
                 NormalizedUserName = Email,
-                TwoFactorEnabled = TwoFactorIsEnabled(),
+                TwoFactorEnabled = twoFactorEnabled,
                 SecurityStamp = SecurityStamp
             };
         }

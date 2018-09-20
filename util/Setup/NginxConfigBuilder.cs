@@ -6,178 +6,127 @@ namespace Bit.Setup
     public class NginxConfigBuilder
     {
         private const string ConfFile = "/bitwarden/nginx/default.conf";
-        private const string SslCiphers =
-            "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:" +
-            "DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA:" +
-            "ECDHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:" +
-            "ECDHE-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA256:" +
-            "AES128-SHA256:AES256-SHA:AES128-SHA:DES-CBC3-SHA:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4:@STRENGTH";
         private const string ContentSecurityPolicy =
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://haveibeenpwned.com; " +
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: https://haveibeenpwned.com https://www.gravatar.com; " +
             "child-src 'self' https://*.duosecurity.com; frame-src 'self' https://*.duosecurity.com; " +
-            "connect-src 'self' https://haveibeenpwned.com https://api.pwnedpasswords.com;";
+            "connect-src 'self' wss://{0} https://haveibeenpwned.com https://api.pwnedpasswords.com;";
 
-        public NginxConfigBuilder(string domain, string url, bool ssl, bool selfSignedSsl, bool letsEncrypt,
-            bool trusted, bool diffieHellman)
+        private readonly Context _context;
+
+        public NginxConfigBuilder(Context context)
         {
-            Domain = domain;
-            Url = url;
-            Ssl = ssl;
-            SelfSignedSsl = selfSignedSsl;
-            LetsEncrypt = letsEncrypt;
-            Trusted = trusted;
-            DiffieHellman = diffieHellman;
+            _context = context;
         }
-
-        public NginxConfigBuilder(string domain, string url)
-        {
-            Domain = domain;
-            Url = url;
-        }
-
-        public bool Ssl { get; private set; }
-        public bool SelfSignedSsl { get; private set; }
-        public bool LetsEncrypt { get; private set; }
-        public string Domain { get; private set; }
-        public string Url { get; private set; }
-        public bool DiffieHellman { get; private set; }
-        public bool Trusted { get; private set; }
 
         public void BuildForInstaller()
         {
-            Build();
+            var model = new TemplateModel(_context);
+            if(model.Ssl && !_context.Config.SslManagedLetsEncrypt)
+            {
+                var sslPath = _context.Install.SelfSignedCert ?
+                    $"/etc/ssl/self/{model.Domain}" : $"/etc/ssl/{model.Domain}";
+                _context.Config.SslCertificatePath = model.CertificatePath =
+                    string.Concat(sslPath, "/", "certificate.crt");
+                _context.Config.SslKeyPath = model.KeyPath =
+                    string.Concat(sslPath, "/", "private.key");
+                if(_context.Install.Trusted)
+                {
+                    _context.Config.SslCaPath = model.CaPath =
+                        string.Concat(sslPath, "/", "ca.crt");
+                }
+                if(_context.Install.DiffieHellman)
+                {
+                    _context.Config.SslDiffieHellmanPath = model.DiffieHellmanPath =
+                        string.Concat(sslPath, "/", "dhparam.pem");
+                }
+            }
+            Build(model);
         }
 
         public void BuildForUpdater()
         {
-            if(File.Exists(ConfFile))
-            {
-                var confContent = File.ReadAllText(ConfFile);
-                Ssl = confContent.Contains("ssl http2;");
-                SelfSignedSsl = confContent.Contains("/etc/ssl/self/");
-                LetsEncrypt = !SelfSignedSsl && confContent.Contains("/etc/letsencrypt/live/");
-                DiffieHellman = confContent.Contains("/dhparam.pem;");
-                Trusted = confContent.Contains("ssl_trusted_certificate ");
-            }
-
-            Build();
+            var model = new TemplateModel(_context);
+            Build(model);
         }
 
-        private void Build()
+        private void Build(TemplateModel model)
         {
             Directory.CreateDirectory("/bitwarden/nginx/");
-
-            var sslPath = LetsEncrypt ? $"/etc/letsencrypt/live/{Domain}" :
-                SelfSignedSsl ? $"/etc/ssl/self/{Domain}" : $"/etc/ssl/{Domain}";
-            var certFile = LetsEncrypt ? "fullchain.pem" : "certificate.crt";
-            var keyFile = LetsEncrypt ? "privkey.pem" : "private.key";
-            var caFile = LetsEncrypt ? "fullchain.pem" : "ca.crt";
-
             Console.WriteLine("Building nginx config.");
+            if(!_context.Config.GenerateNginxConfig)
+            {
+                Console.WriteLine("...skipped");
+                return;
+            }
+
+            var template = Helpers.ReadTemplate("NginxConfig");
             using(var sw = File.CreateText(ConfFile))
             {
-                sw.WriteLine($@"# Config Parameters
-# Parameter:Ssl={Ssl}
-# Parameter:SelfSignedSsl={SelfSignedSsl}
-# Parameter:LetsEncrypt={LetsEncrypt}
-# Parameter:Domain={Domain}
-# Parameter:Url={Url}
-# Parameter:DiffieHellman={DiffieHellman}
-# Parameter:Trusted={Trusted}
+                sw.WriteLine(template(model));
+            }
+        }
 
-server {{
-  listen 8080 default_server;
-  listen [::]:8080 default_server;
-  server_name {Domain};");
+        public class TemplateModel
+        {
+            public TemplateModel() { }
+
+            public TemplateModel(Context context)
+            {
+                Ssl = context.Config.Ssl;
+                Domain = context.Config.Domain;
+                Url = context.Config.Url;
 
                 if(Ssl)
                 {
-                    sw.WriteLine($@"  return 301 {Url}$request_uri;
-}}
-
-server {{
-  listen 8443 ssl http2;
-  listen [::]:8443 ssl http2;
-  server_name {Domain};
-
-  ssl_certificate {sslPath}/{certFile};
-  ssl_certificate_key {sslPath}/{keyFile};
-
-  ssl_session_timeout 30m;
-  ssl_session_cache shared:SSL:20m;
-  ssl_session_tickets off;");
-
-                    if(DiffieHellman)
+                    if(context.Config.SslManagedLetsEncrypt)
                     {
-                        sw.WriteLine($@"
-  # Diffie-Hellman parameter for DHE ciphersuites, recommended 2048 bits
-  ssl_dhparam {sslPath}/dhparam.pem;");
+                        var sslPath = $"/etc/letsencrypt/live/{Domain}";
+                        CertificatePath = CaPath = string.Concat(sslPath, "/", "fullchain.pem");
+                        KeyPath = string.Concat(sslPath, "/", "privkey.pem");
+                        DiffieHellmanPath = string.Concat(sslPath, "/", "dhparam.pem");
                     }
-
-                    sw.WriteLine($@"
-  # SSL protocols TLS v1~TLSv1.2 are allowed. Disabed SSLv3
-  ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
-  # Disabled insecure ciphers suite. For example, MD5, DES, RC4, PSK
-  ssl_ciphers ""{SslCiphers}"";
-  # Enables server-side protection from BEAST attacks
-  ssl_prefer_server_ciphers on;");
-
-                    if(Trusted)
+                    else
                     {
-                        sw.WriteLine($@"
-  # OCSP Stapling ---
-  # Fetch OCSP records from URL in ssl_certificate and cache them
-  ssl_stapling on;
-  ssl_stapling_verify on;
-
-  # Verify chain of trust of OCSP response using Root CA and Intermediate certs
-  ssl_trusted_certificate {sslPath}/{caFile};
-
-  resolver 8.8.8.8 8.8.4.4 208.67.222.222 208.67.220.220 valid=300s;
-
-  # This will enforce HTTP browsing into HTTPS and avoid ssl stripping attack. 6 months age
-  add_header Strict-Transport-Security max-age=15768000;");
+                        CertificatePath = context.Config.SslCertificatePath;
+                        KeyPath = context.Config.SslKeyPath;
+                        CaPath = context.Config.SslCaPath;
+                        DiffieHellmanPath = context.Config.SslDiffieHellmanPath;
                     }
                 }
 
-                sw.WriteLine($@"
-  location / {{
-    proxy_pass http://web:5000/;
-    # Security headers
-    #add_header X-Frame-Options SAMEORIGIN;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection ""1; mode=block"";
-    add_header Referrer-Policy same-origin;
-    add_header Content-Security-Policy ""{ContentSecurityPolicy}"";
-  }}
+                if(!string.IsNullOrWhiteSpace(context.Config.SslCiphersuites))
+                {
+                    SslCiphers = context.Config.SslCiphersuites;
+                }
+                else
+                {
+                    SslCiphers = "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:" +
+                        "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:" +
+                        "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:" +
+                        "ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256";
+                }
 
-  location = /app-id.json {{
-    proxy_pass http://web:5000/app-id.json;
-    proxy_hide_header Content-Type;
-    add_header Content-Type $fido_content_type;
-  }}
-
-  location /attachments/ {{
-    proxy_pass http://attachments:5000/;
-  }}
-
-  location /api/ {{
-    proxy_pass http://api:5000/;
-  }}
-
-  location /identity/ {{
-    proxy_pass http://identity:5000/;
-  }}
-
-  location /icons/ {{
-    proxy_pass http://icons:5000/;
-  }}
-
-  location /admin {{
-    proxy_pass http://admin:5000;
-  }}
-}}");
+                if(!string.IsNullOrWhiteSpace(context.Config.SslVersions))
+                {
+                    SslProtocols = context.Config.SslVersions;
+                }
+                else
+                {
+                    SslProtocols = "TLSv1.2";
+                }
             }
+
+            public bool Ssl { get; set; }
+            public string Domain { get; set; }
+            public string Url { get; set; }
+            public string CertificatePath { get; set; }
+            public string KeyPath { get; set; }
+            public string CaPath { get; set; }
+            public string DiffieHellmanPath { get; set; }
+            public string SslCiphers { get; set; }
+            public string SslProtocols { get; set; }
+            public string ContentSecurityPolicy => string.Format(NginxConfigBuilder.ContentSecurityPolicy, Domain);
         }
     }
 }

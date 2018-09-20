@@ -4,6 +4,7 @@ param (
     [switch] $restart,
     [switch] $stop,
     [switch] $update,
+    [switch] $rebuild,
     [switch] $updatedb,
     [switch] $updateself,
     [string] $output = ""
@@ -42,8 +43,8 @@ if ($output -eq "") {
 
 $scriptsDir = "${output}\scripts"
 $githubBaseUrl = "https://raw.githubusercontent.com/bitwarden/core/master"
-$coreVersion = "1.20.0"
-$webVersion = "1.27.0"
+$coreVersion = "1.24.0"
+$webVersion = "2.3.0"
 
 # Functions
 
@@ -65,7 +66,7 @@ function Check-Output-Dir-Exists {
 }
 
 function Check-Output-Dir-Not-Exists {
-    if (Test-Path -Path $output) {
+    if (Test-Path -Path "$output\docker") {
         throw "Looks like Bitwarden is already installed at $output."
     }
 }
@@ -74,7 +75,7 @@ function Check-Output-Dir-Not-Exists {
 
 if ($install) {
     Check-Output-Dir-Not-Exists
-    New-Item -ItemType directory -Path $output | Out-Null
+    New-Item -ItemType directory -Path $output -ErrorAction Ignore | Out-Null
     Download-Run-File
     Invoke-Expression "$scriptsDir\run.ps1 -install -outputDir $output -coreVersion $coreVersion -webVersion $webVersion"
 }
@@ -86,6 +87,10 @@ elseif ($update) {
     Check-Output-Dir-Exists
     Download-Run-File
     Invoke-Expression "$scriptsDir\run.ps1 -update -outputDir $output -coreVersion $coreVersion -webVersion $webVersion"
+}
+elseif ($rebuild) {
+    Check-Output-Dir-Exists
+    Invoke-Expression "$scriptsDir\run.ps1 -rebuild -outputDir $output -coreVersion $coreVersion -webVersion $webVersion"
 }
 elseif ($updatedb) {
     Check-Output-Dir-Exists

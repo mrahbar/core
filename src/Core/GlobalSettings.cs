@@ -11,6 +11,7 @@ namespace Bit.Core
         public virtual string LogDirectory { get; set; }
         public virtual string LicenseDirectory { get; set; }
         public virtual string PushRelayBaseUri { get; set; }
+        public virtual string InternalIdentityKey { get; set; }
         public virtual bool DisableUserRegistration { get; set; }
         public virtual InstallationSettings Installation { get; set; } = new InstallationSettings();
         public virtual BaseServiceUriSettings BaseServiceUri { get; set; } = new BaseServiceUriSettings();
@@ -18,6 +19,7 @@ namespace Bit.Core
         public virtual MailSettings Mail { get; set; } = new MailSettings();
         public virtual StorageSettings Storage { get; set; } = new StorageSettings();
         public virtual StorageSettings Events { get; set; } = new StorageSettings();
+        public virtual NotificationsSettings Notifications { get; set; } = new NotificationsSettings();
         public virtual AttachmentSettings Attachment { get; set; } = new AttachmentSettings();
         public virtual IdentityServerSettings IdentityServer { get; set; } = new IdentityServerSettings();
         public virtual DataProtectionSettings DataProtection { get; set; } = new DataProtectionSettings();
@@ -35,6 +37,8 @@ namespace Bit.Core
             public string Api { get; set; }
             public string Identity { get; set; }
             public string Admin { get; set; }
+            public string Notifications { get; set; }
+            public string InternalNotifications { get; set; }
             public string InternalAdmin { get; set; }
             public string InternalIdentity { get; set; }
             public string InternalApi { get; set; }
@@ -99,6 +103,7 @@ namespace Bit.Core
                 public string Username { get; set; }
                 public string Password { get; set; }
                 public bool UseDefaultCredentials { get; set; } = false;
+                public string AuthType { get; set; }
             }
         }
 
@@ -123,6 +128,11 @@ namespace Bit.Core
         public class SentrySettings
         {
             public string Dsn { get; set; }
+        }
+
+        public class NotificationsSettings : StorageSettings
+        {
+            public string AzureSignalRConnectionString { get; set; }
         }
 
         public class NotificationHubSettings

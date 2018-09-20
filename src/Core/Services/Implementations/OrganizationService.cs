@@ -185,6 +185,7 @@ namespace Bit.Core.Services
                 // They must have been on a free plan. Create new sub.
                 var subCreateOptions = new StripeSubscriptionCreateOptions
                 {
+                    CustomerId = organization.GatewayCustomerId,
                     TrialPeriodDays = newPlan.TrialPeriodDays,
                     Items = new List<StripeSubscriptionItemOption>(),
                     Metadata = new Dictionary<string, string> {
@@ -210,7 +211,7 @@ namespace Bit.Core.Services
                     });
                 }
 
-                await subscriptionService.CreateAsync(organization.GatewayCustomerId, subCreateOptions);
+                await subscriptionService.CreateAsync(subCreateOptions);
             }
             else
             {
@@ -446,7 +447,7 @@ namespace Bit.Core.Services
             StripeSubscription subscription = null;
 
             // Pre-generate the org id so that we can save it with the Stripe subscription..
-            Guid newOrgId = CoreHelpers.GenerateComb();
+            var newOrgId = CoreHelpers.GenerateComb();
 
             if(plan.Type == PlanType.Free)
             {
@@ -468,6 +469,7 @@ namespace Bit.Core.Services
 
                 var subCreateOptions = new StripeSubscriptionCreateOptions
                 {
+                    CustomerId = customer.Id,
                     TrialPeriodDays = plan.TrialPeriodDays,
                     Items = new List<StripeSubscriptionItemOption>(),
                     Metadata = new Dictionary<string, string> {
@@ -504,7 +506,7 @@ namespace Bit.Core.Services
 
                 try
                 {
-                    subscription = await subscriptionService.CreateAsync(customer.Id, subCreateOptions);
+                    subscription = await subscriptionService.CreateAsync(subCreateOptions);
                 }
                 catch(StripeException)
                 {
@@ -770,7 +772,11 @@ namespace Bit.Core.Services
         {
             if(!string.IsNullOrWhiteSpace(organization.GatewaySubscriptionId))
             {
-                await _stripePaymentService.CancelSubscriptionAsync(organization, true);
+                try
+                {
+                    await _stripePaymentService.CancelSubscriptionAsync(organization, true);
+                }
+                catch(GatewayException) { }
             }
 
             await _organizationRepository.DeleteAsync(organization);
@@ -1143,6 +1149,7 @@ namespace Bit.Core.Services
                 // push
                 var deviceIds = await GetUserDeviceIdsAsync(orgUser.UserId.Value);
                 await _pushRegistrationService.DeleteUserRegistrationOrganizationAsync(deviceIds, organizationId.ToString());
+                await _pushNotificationService.PushSyncOrgKeysAsync(orgUser.UserId.Value);
             }
         }
 
@@ -1168,6 +1175,7 @@ namespace Bit.Core.Services
                 // push
                 var deviceIds = await GetUserDeviceIdsAsync(orgUser.UserId.Value);
                 await _pushRegistrationService.DeleteUserRegistrationOrganizationAsync(deviceIds, organizationId.ToString());
+                await _pushNotificationService.PushSyncOrgKeysAsync(orgUser.UserId.Value);
             }
         }
 
